@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // memos 컬렉션 규칙
+    match /memos/{memoId} {
+      // 메모 목록은 누구나 읽을 수 있습니다.
+      allow read: if true;
+
+      // 메모를 추가할 때:
+      // 1. text 필드가 문자열(string)이어야 함
+      // 2. 글자 수가 5글자 이상이어야 함 (size() >= 5)
+      // 3. 글자 수가 50글자 미만이어야 함 (size() < 50)
+      allow create: if request.resource.data.text is string
+                    && request.resource.data.text.size() >= 5
+                    && request.resource.data.text.size() < 50;
+
+      // 메모 삭제는 허용 (추후 로그인 기능 구현 시 본인 것만 삭제하도록 변경)
+      allow delete: if true;
+    }
+  }
+}
