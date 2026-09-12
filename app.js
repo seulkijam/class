@@ -41,6 +41,17 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 
+// 교사(관리자) UID 목록
+// 여기에 교사의 UID 문자열을 넣으면 '교사(teacher)' 권한을 갖습니다.
+// (로그인 후 상단의 '내 UID 복사' 버튼으로 확인하여 등록 가능)
+const TEACHER_UIDS = [];
+
+// 사용자 역할 판별 ('teacher' 또는 'student')
+function getUserRole(user) {
+  if (!user) return null;
+  return TEACHER_UIDS.includes(user.uid) ? "teacher" : "student";
+}
+
 // 현재 로그인한 사용자 정보 (로그아웃 시 null)
 let currentUser = null;
 
@@ -72,7 +83,7 @@ async function loadMemos() {
 
 // 메모를 새로 씁니다.
 // 5글자 이상, 50글자 미만일 때만 Firestore에 저장합니다.
-// 백엔드 2: 여기에 "누가 썼는지"(uid, author)를 함께 저장하게 됩니다.
+// 학생은 자기 것만 생성할 수 있으며, 작성자의 uid와 author, role을 함께 저장합니다.
 async function addMemo(text) {
   if (!currentUser) {
     alert("로그인 후 메모를 작성할 수 있습니다.");
@@ -84,12 +95,15 @@ async function addMemo(text) {
     return false;
   }
 
+  const role = getUserRole(currentUser);
+
   try {
     await addDoc(collection(db, "memos"), {
       text: text,
       createdAt: Date.now(),
       uid: currentUser.uid,
-      author: currentUser.displayName || "익명"
+      author: currentUser.displayName || "익명",
+      role: role
     });
     return true;
   } catch (error) {
@@ -100,13 +114,19 @@ async function addMemo(text) {
 }
 
 // 메모를 지웁니다.
-// 백엔드 2: 지금은 누구든 남의 메모를 지울 수 있습니다. 이걸 막는 것이 과제입니다.
+// 교사에게 모든 권한이 부여되며, 학생은 삭제 권한이 없습니다.
 async function deleteMemo(id) {
+  const role = getUserRole(currentUser);
+  if (role !== "teacher") {
+    alert("메모 삭제는 교사만 가능합니다.");
+    return;
+  }
+
   try {
     await deleteDoc(doc(db, "memos", id));
   } catch (error) {
     console.error("메모를 삭제하는 중 오류가 발생했습니다:", error);
-    alert("메모 삭제 실패: 본인 메모만 삭제할 수 있습니다.");
+    alert("메모 삭제 실패: 교사 권한이 없거나 오류가 발생했습니다.");
   }
 }
 
@@ -130,13 +150,19 @@ function makeMemo(memo) {
   const div = document.createElement("div");
   div.className = "memo";
 
-  // 본인이 작성한 메모이거나 작성자 정보(uid)가 없는 기존 메모인 경우에만 삭제 버튼 표시
-  if (!memo.uid || (currentUser && currentUser.uid === memo.uid)) {
+  const isTeacher = getUserRole(currentUser) === "teacher";
+
+  // 교사에게 모든 권한 부여: 교사에게만 삭제 버튼(×)이 표시됩니다.
+  // 학생은 다른 사람의 메모를 건드릴 수 없고 오직 자기 것만 생성 가능합니다.
+  if (isTeacher) {
     const del = document.createElement("button");
     del.textContent = "×";
+    del.title = "교사 권한으로 삭제";
     del.addEventListener("click", async function () {
-      await deleteMemo(memo.id);
-      await render();
+      if (confirm("이 메모를 삭제하시겠습니까?")) {
+        await deleteMemo(memo.id);
+        await render();
+      }
     });
     div.appendChild(del);
   }
@@ -145,13 +171,13 @@ function makeMemo(memo) {
   span.textContent = memo.text;
   div.appendChild(span);
 
-  // 작성자 정보가 있으면 하단에 작게 표시
+  // 작성자 정보 및 역할 표시
   if (memo.author) {
     const authorDiv = document.createElement("div");
     authorDiv.style.fontSize = "12px";
     authorDiv.style.color = "#888";
     authorDiv.style.marginTop = "6px";
-    authorDiv.textContent = memo.author;
+    authorDiv.textContent = memo.role === "teacher" ? `${memo.author} (교사)` : memo.author;
     div.appendChild(authorDiv);
   }
 
@@ -192,8 +218,21 @@ function renderUserArea() {
   userArea.innerHTML = "";
 
   if (currentUser) {
+    const role = getUserRole(currentUser);
+    const roleLabel = role === "teacher" ? "교사" : "학생";
+
     const span = document.createElement("span");
-    span.textContent = `${currentUser.displayName || currentUser.email || "사용자"}님 환영합니다! `;
+    span.textContent = `${currentUser.displayName || currentUser.email || "사용자"}님 (${roleLabel}) `;
+
+    // UID 복사 버튼 (교사 UID 등록에 편리하도록 제공)
+    const copyUidBtn = document.createElement("button");
+    copyUidBtn.textContent = "내 UID 복사";
+    copyUidBtn.style.marginRight = "8px";
+    copyUidBtn.style.fontSize = "12px";
+    copyUidBtn.addEventListener("click", function () {
+      navigator.clipboard.writeText(currentUser.uid);
+      alert(`내 UID가 복사되었습니다:\n${currentUser.uid}\n\napp.js와 firestore.rules의 TEACHER_UIDS 목록에 넣으시면 교사 권한이 부여됩니다.`);
+    });
 
     const logoutBtn = document.createElement("button");
     logoutBtn.textContent = "로그아웃";
@@ -206,6 +245,7 @@ function renderUserArea() {
     });
 
     userArea.appendChild(span);
+    userArea.appendChild(copyUidBtn);
     userArea.appendChild(logoutBtn);
   } else {
     const loginBtn = document.createElement("button");
