@@ -7,16 +7,18 @@ service cloud.firestore {
       // 메모 목록은 누구나 읽을 수 있습니다.
       allow read: if true;
 
-      // 메모를 추가할 때:
-      // 1. text 필드가 문자열(string)이어야 함
-      // 2. 글자 수가 5글자 이상이어야 함 (size() >= 5)
-      // 3. 글자 수가 50글자 미만이어야 함 (size() < 50)
-      allow create: if request.resource.data.text is string
+      // 메모 추가:
+      // 1. 로그인한 사용자만 가능 (request.auth != null)
+      // 2. 내용이 문자열이고 5글자 이상 50글자 미만
+      allow create: if request.auth != null
+                    && request.resource.data.text is string
                     && request.resource.data.text.size() >= 5
                     && request.resource.data.text.size() < 50;
 
-      // 메모 삭제는 허용 (추후 로그인 기능 구현 시 본인 것만 삭제하도록 변경)
-      allow delete: if true;
+      // 메모 삭제:
+      // 로그인한 사용자 중 본인이 작성한 메모이거나 기존 작성자 정보가 없는 메모만 삭제 가능
+      allow delete: if request.auth != null
+                    && (!('uid' in resource.data) || resource.data.uid == request.auth.uid);
     }
   }
 }

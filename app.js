@@ -17,6 +17,13 @@ import {
   query,
   orderBy
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+import {
+  getAuth,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 
 // Firebase 설정 정보
 const firebaseConfig = {
@@ -28,9 +35,14 @@ const firebaseConfig = {
   appId: "1:90807585118:web:6fc88a5d04ab72633be7cf"
 };
 
-// Firebase 초기화 및 Firestore 연결
+// Firebase 초기화 및 Firestore, Auth 연결
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+// 현재 로그인한 사용자 정보 (로그아웃 시 null)
+let currentUser = null;
 
 
 // ===================================================
@@ -60,8 +72,13 @@ async function loadMemos() {
 
 // 메모를 새로 씁니다.
 // 5글자 이상, 50글자 미만일 때만 Firestore에 저장합니다.
-// 백엔드 2: 여기에 "누가 썼는지"(uid)를 함께 저장하게 됩니다.
+// 백엔드 2: 여기에 "누가 썼는지"(uid, author)를 함께 저장하게 됩니다.
 async function addMemo(text) {
+  if (!currentUser) {
+    alert("로그인 후 메모를 작성할 수 있습니다.");
+    return false;
+  }
+
   if (text.length < 5 || text.length >= 50) {
     alert("메모는 5글자 이상, 50글자 미만으로 입력해 주세요.");
     return false;
@@ -70,7 +87,9 @@ async function addMemo(text) {
   try {
     await addDoc(collection(db, "memos"), {
       text: text,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      uid: currentUser.uid,
+      author: currentUser.displayName || "익명"
     });
     return true;
   } catch (error) {
@@ -87,6 +106,7 @@ async function deleteMemo(id) {
     await deleteDoc(doc(db, "memos", id));
   } catch (error) {
     console.error("메모를 삭제하는 중 오류가 발생했습니다:", error);
+    alert("메모 삭제 실패: 본인 메모만 삭제할 수 있습니다.");
   }
 }
 
@@ -110,17 +130,30 @@ function makeMemo(memo) {
   const div = document.createElement("div");
   div.className = "memo";
 
-  const del = document.createElement("button");
-  del.textContent = "×";
-  del.addEventListener("click", async function () {
-    await deleteMemo(memo.id);
-    await render();
-  });
-  div.appendChild(del);
+  // 본인이 작성한 메모이거나 작성자 정보(uid)가 없는 기존 메모인 경우에만 삭제 버튼 표시
+  if (!memo.uid || (currentUser && currentUser.uid === memo.uid)) {
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.addEventListener("click", async function () {
+      await deleteMemo(memo.id);
+      await render();
+    });
+    div.appendChild(del);
+  }
 
   const span = document.createElement("span");
   span.textContent = memo.text;
   div.appendChild(span);
+
+  // 작성자 정보가 있으면 하단에 작게 표시
+  if (memo.author) {
+    const authorDiv = document.createElement("div");
+    authorDiv.style.fontSize = "12px";
+    authorDiv.style.color = "#888";
+    authorDiv.style.marginTop = "6px";
+    authorDiv.textContent = memo.author;
+    div.appendChild(authorDiv);
+  }
 
   return div;
 }
@@ -149,6 +182,56 @@ input.addEventListener("keydown", async function (e) {
 });
 
 
+// ===================================================
+// 사용자 로그인 영역 그리기
+// ===================================================
+
+function renderUserArea() {
+  const userArea = document.getElementById("userArea");
+  if (!userArea) return;
+  userArea.innerHTML = "";
+
+  if (currentUser) {
+    const span = document.createElement("span");
+    span.textContent = `${currentUser.displayName || currentUser.email || "사용자"}님 환영합니다! `;
+
+    const logoutBtn = document.createElement("button");
+    logoutBtn.textContent = "로그아웃";
+    logoutBtn.addEventListener("click", async function () {
+      try {
+        await signOut(auth);
+      } catch (error) {
+        console.error("로그아웃 실패:", error);
+      }
+    });
+
+    userArea.appendChild(span);
+    userArea.appendChild(logoutBtn);
+  } else {
+    const loginBtn = document.createElement("button");
+    loginBtn.textContent = "Google 계정으로 로그인";
+    loginBtn.addEventListener("click", async function () {
+      try {
+        await signInWithPopup(auth, provider);
+      } catch (error) {
+        console.error("로그인 실패:", error);
+        alert("로그인에 실패했습니다: " + error.message);
+      }
+    });
+
+    userArea.appendChild(loginBtn);
+  }
+}
+
+// 로그인 상태 변경 감지 (로그인/로그아웃 시 화면 갱신)
+onAuthStateChanged(auth, function (user) {
+  currentUser = user;
+  renderUserArea();
+  render();
+});
+
+
 // 첫 화면 그리기
+renderUserArea();
 render();
 input.focus();
